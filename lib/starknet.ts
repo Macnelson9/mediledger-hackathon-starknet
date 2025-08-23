@@ -52,7 +52,7 @@ export function useContractWriteUtility(
 
   const calls = useMemo(() => {
     if (!contract || !functionName || !args?.length) {
-      return undefined; // prevent crashing at render
+      return undefined;
     }
     try {
       return [contract.populate(functionName, args)];
