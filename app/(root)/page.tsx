@@ -54,7 +54,7 @@ export default function Home() {
 
       console.log(`Attempting to register as ${selectedRole}...`);
       console.log("Function name:", functionName);
-      console.log("UUID: ", toFeltUUID(deriveUUID(address, selectedRole)))
+      console.log("UUID: ", toFeltUUID(deriveUUID(address, selectedRole)));
 
       const result = await account.execute({
         contractAddress: contractAddress,
@@ -90,15 +90,15 @@ export default function Home() {
     } finally {
       setIsRegistering(false);
     }
-
-    if (isPatient) {
-      router.push("/patient/dashboard");
-    }
-
-    if (isHospital) {
-      router.push("/hospital/dashboard");
-    }
   };
+
+  if (isPatient) {
+    router.push("/patient/dashboard");
+  }
+
+  if (isHospital) {
+    router.push("/hospital/dashboard");
+  }
 
   return (
     <section className="flex justify-center items-center h-screen bg-gradient-to-br from-blue-100 to-purple-200">

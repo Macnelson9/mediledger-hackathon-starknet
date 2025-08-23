@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { CldUploadWidget } from "next-cloudinary";
 import { z } from "zod";
+import { useContractFetch } from "@/lib/starknet";
+import { useAccount } from "@starknet-react/core";
 
 interface Request {
   patientUuid: string;
@@ -35,7 +37,6 @@ interface PatientRecord {
 
 const uuidSchema = z
   .string()
-  .regex(/^MED-[0-9A-F]{8}$/, "Invalid Patient UUID format (e.g., MED-7FA34B21)");
 const titleSchema = z.object({
   title: z.string().min(3, "Record title must be at least 3 characters."),
 });
@@ -55,8 +56,10 @@ export default function HospitalDashboardPatients() {
   const [records, setRecords] = useState<PatientRecord[]>([]);
   const [recordsPatientId, setRecordsPatientId] = useState<string | null>(null);
 
+  
   const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
+  const { address } = useAccount();
   useEffect(() => {
     if (typeof window === "undefined") return;
     const account = localStorage.getItem("medledger_account");
@@ -84,7 +87,10 @@ export default function HospitalDashboardPatients() {
     }, 4000);
   };
 
+  
+
   const handleSubmit = async () => {
+    
     if (!hospitalUuid) {
       addToast("error", "Hospital not logged in.");
       return;
@@ -96,11 +102,14 @@ export default function HospitalDashboardPatients() {
       return;
     }
 
+    const { readData: patientExists} = useContractFetch("verify_patient", [
+          address ? patientUuid : "0x0",
+        ]);
+
     try {
-      const records: MedLedgerAccount[] = JSON.parse(
-        localStorage.getItem("medledger_records") || "[]"
-      );
-      const patientExists = records.some((acc) => acc.id === patientUuid);
+      // const records: MedLedgerAccount[] = JSON.parse(
+      //   localStorage.getItem("medledger_records") || "[]"
+      // );
 
       if (!patientExists) {
         addToast("error", "Patient not found in MediLedger.");
@@ -273,7 +282,7 @@ export default function HospitalDashboardPatients() {
                 type="text"
                 placeholder="e.g., MED-7FA34B21"
                 value={patientUuid}
-                onChange={(e) => setPatientUuid(e.target.value.toUpperCase())}
+                onChange={(e) => setPatientUuid(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-300"
               />
             </div>

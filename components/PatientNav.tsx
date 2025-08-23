@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useAccount } from "@starknet-react/core";
 import { deriveUUID, toFeltUUID } from "@/utils/starkEncoding";
+import { shortString } from "starknet";
 
 interface MedLedgerAccount {
   address: string;
@@ -31,7 +32,7 @@ export function PatientNav() {
 
   const handleCopyUUID = async () => {
     if (address) {
-      const uuid = toFeltUUID(address);
+      const uuid = toFeltUUID(deriveUUID(address, "patient"));
       try {
         await navigator.clipboard.writeText(uuid);
         setCopied(true);
@@ -41,18 +42,19 @@ export function PatientNav() {
       }
     }
   };
-
-  if (!user) {
+  const patientUUID = address
+    ? toFeltUUID(deriveUUID(address, "patient"))
+    : null;
+  if (!patientUUID) {
     return <p>Loading...</p>;
   }
-
-  const patientUUID = address ? toFeltUUID(deriveUUID(address, "patient")) : null;
+  // const roleFelt = shortString.encodeShortString("patient");
 
   return (
     <nav className="bg-blue-200/50 flex flex-col items-center w-[20vw] h-screen">
       <div className="max-w-7xl mx-auto px-4 py-6 w-full">
         <h1 className="text-3xl font-bold text-gray-800 mb-4">MediLedger</h1>
-        <p className="text-sm text-gray-600 mb-4">{user.id}</p>
+        {/* <p className="text-sm text-gray-600 mb-4">{patientUUID}</p> */}
 
         {/* Patient UUID Section */}
         {patientUUID && (
