@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { CldUploadWidget } from "next-cloudinary";
 import { z } from "zod";
-import { useContractFetch } from "@/lib/starknet";
+import { useContractFetch, useContractWriteUtility } from "@/lib/starknet";
 import { useAccount } from "@starknet-react/core";
+import { MEDILEDGER_ABI } from "@/abi/Mediledger";
+import { shortString } from "starknet";
 
 interface Request {
   patientUuid: string;
@@ -35,8 +37,7 @@ interface PatientRecord {
   timestamp: number;
 }
 
-const uuidSchema = z
-  .string()
+const uuidSchema = z.string();
 const titleSchema = z.object({
   title: z.string().min(3, "Record title must be at least 3 characters."),
 });
@@ -55,11 +56,23 @@ export default function HospitalDashboardPatients() {
   const [showRecordsModal, setShowRecordsModal] = useState(false);
   const [records, setRecords] = useState<PatientRecord[]>([]);
   const [recordsPatientId, setRecordsPatientId] = useState<string | null>(null);
+  const { address } = useAccount();
 
-  
   const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
-  const { address } = useAccount();
+  // ✅ Move hooks to component level - only call when needed
+  const { readData: patientVerified, dataRefetch: refetchPatient } = useContractFetch("verify_patient", [
+    patientUuid || "0x0", // Provide fallback to prevent empty calls
+  ]);
+
+  // ✅ Contract write hook at component level
+  const { writeAsync, writeIsPending } = useContractWriteUtility(
+    "request_access",
+    [patientUuid || "0x0", address || "0x0"],
+    MEDILEDGER_ABI
+  );
+
+  // ✅ Load hospital data from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     const account = localStorage.getItem("medledger_account");
@@ -75,7 +88,10 @@ export default function HospitalDashboardPatients() {
 
   useEffect(() => {
     if (hospitalUuid && typeof window !== "undefined") {
-      localStorage.setItem(`hospital_requests_${hospitalUuid}`, JSON.stringify(requests));
+      localStorage.setItem(
+        `hospital_requests_${hospitalUuid}`,
+        JSON.stringify(requests)
+      );
     }
   }, [requests, hospitalUuid]);
 
@@ -87,12 +103,10 @@ export default function HospitalDashboardPatients() {
     }, 4000);
   };
 
-  
-
-  const handleSubmit = async () => {
-    
-    if (!hospitalUuid) {
-      addToast("error", "Hospital not logged in.");
+  // ✅ Fixed contract function usage
+  const handleSubmit = useCallback(async () => {
+    if (!hospitalUuid || !address) {
+      addToast("error", "Hospital not logged in or wallet not connected.");
       return;
     }
 
@@ -102,38 +116,63 @@ export default function HospitalDashboardPatients() {
       return;
     }
 
-    const { readData: patientExists} = useContractFetch("verify_patient", [
-          address ? patientUuid : "0x0",
-        ]);
-
     try {
-      // const records: MedLedgerAccount[] = JSON.parse(
-      //   localStorage.getItem("medledger_records") || "[]"
-      // );
+      // ✅ Step 1: Verify patient first
+      await refetchPatient();
+      // const { readData: patientVerified } = useContractFetch("verify_patient", [
+      //   patientUuid,
+      // ]);
 
-      if (!patientExists) {
-        addToast("error", "Patient not found in MediLedger.");
+      if (!patientVerified) {
+        addToast("error", "Patient not found on MediLedger.");
         return;
       }
 
+
+
+      // ✅ Step 2: Request access on-chain with correct function
+      try {
+        if (writeAsync) {
+          const tx = await writeAsync();
+          console.log("request_access TX:", tx);  
+          addToast("success", "Request sent to MediLedger contract!");
+        }
+        // const patientIdFelt = shortString.encodeShortString(patientUuid);
+        
+        // Initialize the contract write function with correct parameters
+        // const { writeAsync } = useContractWriteUtility(
+        //   "request_access",
+        //   [patientUuid, address],
+        //   MEDILEDGER_ABI
+        // );
+
+        // const tx = await writeAsync();
+        // console.log("request_access TX:", tx);
+        // addToast("success", "Request sent to MediLedger contract!");
+      } catch (err) {
+        console.error("request_access failed:", err);
+        addToast("error", "On-chain request failed. Using fallback only.");
+      }
+
+      // ✅ Always keep local fallback
       const newRequest: Request = {
         patientUuid,
         hospitalUuid,
         status: "pending",
         timestamp: Date.now(),
       };
-
       setRequests((prev) => [newRequest, ...prev]);
-      addToast("success", "Request sent successfully!");
 
       setPatientUuid("");
       setShowModal(false);
     } catch (err) {
-      addToast("error", "Error sending request.");
+      console.error(err);
+      addToast("error", "Unexpected error while sending request.");
     }
-  };
+  }, [patientUuid, hospitalUuid, address]);
 
-  const formatDate = (timestamp: number) => new Date(timestamp).toLocaleString();
+  const formatDate = (timestamp: number) =>
+    new Date(timestamp).toLocaleString();
 
   const openUploadForRequest = (req: Request) => {
     setActiveRequest(req);
@@ -177,7 +216,7 @@ export default function HospitalDashboardPatients() {
       hospitalUuid,
       title: recordTitle.trim(),
       fileName,
-      url: fileUrl, // Clodinary secure url
+      url: fileUrl,
       timestamp: Date.now(),
     };
 
@@ -195,8 +234,10 @@ export default function HospitalDashboardPatients() {
     setShowRecordsModal(true);
   };
 
+  // Rest of the JSX remains the same...
   return (
     <div className="relative">
+      {/* Toasts */}
       <div className="fixed top-4 right-4 space-y-2 z-50">
         {toasts.map((toast) => (
           <div
@@ -209,7 +250,11 @@ export default function HospitalDashboardPatients() {
           </div>
         ))}
       </div>
-      <h1 className="font-medium text-5xl leading-none tracking-normal">Patients</h1>
+
+      <h1 className="font-medium text-5xl leading-none tracking-normal">
+        Patients
+      </h1>
+
       <div className="mt-8">
         <button
           className="text-xl flex justify-start bg-blue-400 text-white font-medium px-4 py-3 rounded-lg cursor-pointer transition-colors ease-in-out hover:bg-blue-500"
@@ -218,10 +263,13 @@ export default function HospitalDashboardPatients() {
           Add New Patients
         </button>
       </div>
+{/* Requests list */}
       <div className="flex flex-col mt-8">
         <h3 className="text-3xl font-semibold mb-4">Recent Activities</h3>
         <div className="space-y-3">
-          {requests.length === 0 && <p className="text-gray-500">No requests yet.</p>}
+          {requests.length === 0 && (
+            <p className="text-gray-500">No requests yet.</p>
+          )}
           {requests.map((req) => (
             <div
               key={req.timestamp}
@@ -229,8 +277,12 @@ export default function HospitalDashboardPatients() {
             >
               <div className="flex justify-between items-center">
                 <div>
-                  <p className="font-medium text-gray-800">Patient UUID: {req.patientUuid}</p>
-                  <p className="text-sm text-gray-500">Sent: {formatDate(req.timestamp)}</p>
+                  <p className="font-medium text-gray-800">
+                    Patient UUID: {req.patientUuid}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Sent: {formatDate(req.timestamp)}
+                  </p>
                 </div>
                 <span
                   className={`px-3 py-1 rounded-full text-sm font-medium ${
@@ -263,11 +315,16 @@ export default function HospitalDashboardPatients() {
           ))}
         </div>
       </div>
+
+      {/* Rest of the component JSX remains the same... */}
+      {/* Modal: Request patient */}
       {showModal && (
         <div className="fixed inset-0 z-40 grid place-items-center backdrop-blur-sm bg-slate-900/20">
           <div className="w-full max-w-md rounded-2xl border border-slate-200/60 bg-white shadow-xl">
             <div className="flex items-center justify-between px-5 py-4 border-b">
-              <h2 className="text-lg font-semibold">Request Patient Permission</h2>
+              <h2 className="text-lg font-semibold">
+                Request Patient Permission
+              </h2>
               <button
                 onClick={() => setShowModal(false)}
                 className="rounded-full p-1.5 hover:bg-slate-100"
@@ -277,10 +334,12 @@ export default function HospitalDashboardPatients() {
               </button>
             </div>
             <div className="p-5 space-y-4">
-              <label className="block text-sm font-medium text-slate-700">Patient UUID</label>
+              <label className="block text-sm font-medium text-slate-700">
+                Patient UUID
+              </label>
               <input
                 type="text"
-                placeholder="e.g., MED-7FA34B21"
+                placeholder="e.g., PAT-7FA34B21"
                 value={patientUuid}
                 onChange={(e) => setPatientUuid(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-300"
@@ -303,6 +362,9 @@ export default function HospitalDashboardPatients() {
           </div>
         </div>
       )}
+
+      {/* Other modals and components remain the same... */}
+{/* Modal: Upload record */}
       {showUploadModal && activeRequest && (
         <div className="fixed inset-0 z-50 grid place-items-center">
           <div
@@ -317,7 +379,8 @@ export default function HospitalDashboardPatients() {
               <div>
                 <h3 className="text-lg font-semibold">Upload Patient Record</h3>
                 <p className="text-xs text-slate-500">
-                  Patient: <span className="font-mono">{activeRequest.patientUuid}</span>
+                  Patient:{" "}
+                  <span className="font-mono">{activeRequest.patientUuid}</span>
                 </p>
               </div>
               <button
@@ -333,13 +396,15 @@ export default function HospitalDashboardPatients() {
             </div>
             {activeRequest.status !== "approved" && (
               <div className="mx-6 mt-4 mb-0 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-amber-800 text-sm">
-                This hospital has not been approved by the patient yet. You cannot upload a record
-                until the request is <b>approved</b>.
+                This hospital has not been approved by the patient yet. You
+                cannot upload a record until the request is <b>approved</b>.
               </div>
             )}
             <div className="px-6 py-5 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700">Record Title</label>
+                <label className="block text-sm font-medium text-slate-700">
+                  Record Title
+                </label>
                 <input
                   type="text"
                   value={recordTitle}
@@ -349,11 +414,14 @@ export default function HospitalDashboardPatients() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">Upload File</label>
+                <label className="block text-sm font-medium text-slate-700">
+                  Upload File
+                </label>
 
                 {!uploadPreset ? (
                   <p className="mt-1 text-sm text-red-600">
-                    Missing <code>NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET</code> in <code>.env.local</code>
+                    Missing <code>NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET</code> in{" "}
+                    <code>.env.local</code>
                   </p>
                 ) : (
                   <CldUploadWidget
@@ -412,7 +480,9 @@ export default function HospitalDashboardPatients() {
                         className="mt-1 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                         disabled={activeRequest.status !== "approved"}
                       >
-                        {fileName ? `Uploaded: ${fileName}` : "Upload to Cloudinary"}
+                        {fileName
+                          ? `Uploaded: ${fileName}`
+                          : "Upload to Cloudinary"}
                       </button>
                     )}
                   </CldUploadWidget>
@@ -450,6 +520,8 @@ export default function HospitalDashboardPatients() {
           </div>
         </div>
       )}
+
+      {/* Modal: View records */}
       {showRecordsModal && (
         <div className="fixed inset-0 z-50 grid place-items-center">
           <div
@@ -475,19 +547,18 @@ export default function HospitalDashboardPatients() {
                 {records.map((rec) => (
                   <li
                     key={rec.id}
-                    className="p-4 border border-gray-200 rounded-lg bg-slate-50"
+                    className="p-4 rounded-lg border border-slate-200 shadow-sm"
                   >
-                    <p className="font-medium">{rec.title}</p>
-                    <p className="text-sm text-gray-600">{rec.fileName}</p>
-                    <p className="text-xs text-gray-500">
-                      Uploaded: {formatDate(rec.timestamp)}
+                    <h4 className="font-medium">{rec.title}</h4>
+                    <p className="text-xs text-slate-500">
+                      Uploaded on {formatDate(rec.timestamp)}
                     </p>
                     {rec.url && (
                       <a
                         href={rec.url}
                         target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-block mt-2 text-blue-600 hover:underline text-sm"
+                        rel="noreferrer"
+                        className="text-blue-600 text-sm hover:underline mt-1 inline-block"
                       >
                         View File
                       </a>

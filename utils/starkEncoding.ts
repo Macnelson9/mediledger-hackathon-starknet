@@ -17,3 +17,4 @@ export const deriveUUID = (address: string, role: "patient" | "hospital"): strin
 
   return `${prefix}${shortId}`;
 };
+
