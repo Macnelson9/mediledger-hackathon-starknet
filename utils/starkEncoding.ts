@@ -1,12 +1,14 @@
-import { hash } from "starknet";
+import { hash, shortString } from "starknet";
 
 
 export const toFeltUUID = (id: string): string => {
-  return hash.computeHashOnElements([id]);
+  const idFelt = shortString.encodeShortString(id); 
+  return hash.computeHashOnElements([idFelt]);
 };
 
 export const deriveUUID = (address: string, role: "patient" | "hospital"): string => {
-  const feltHash = hash.computeHashOnElements([address, role]);
+  const roleFelt = shortString.encodeShortString(role);
+  const feltHash = hash.computeHashOnElements([address, roleFelt]);
   const shortId = feltHash
     .replace(/^0x/, "")
     .toUpperCase()
