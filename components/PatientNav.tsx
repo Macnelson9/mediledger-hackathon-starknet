@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useAccount } from "@starknet-react/core";
 import { deriveUUID, toFeltUUID } from "@/utils/starkEncoding";
 import { shortString } from "starknet";
+import Image from "next/image";
 
 interface MedLedgerAccount {
   address: string;
@@ -53,7 +54,14 @@ export function PatientNav() {
   return (
     <nav className="bg-blue-200/50 flex flex-col items-center w-[20vw] h-screen">
       <div className="max-w-7xl mx-auto px-4 py-6 w-full">
-        <h1 className="text-3xl font-bold text-gray-800 mb-4">MediLedger</h1>
+        <Image
+          src="/logo-removebg-preview.png"
+          alt="logo"
+          width={200}
+          height={200}
+          className="mx-auto"
+        />
+        {/* <h1 className="text-3xl font-bold text-gray-800 mb-4">MediLedger</h1> */}
         {/* <p className="text-sm text-gray-600 mb-4">{patientUUID}</p> */}
 
         {/* Patient UUID Section */}

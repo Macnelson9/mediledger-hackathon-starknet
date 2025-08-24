@@ -8,6 +8,7 @@ import { contractAddress, MEDILEDGER_ABI } from "@/abi/Mediledger";
 import { useContractFetch } from "@/lib/starknet";
 import { toFeltUUID, deriveUUID } from "@/utils/starkEncoding";
 import { byteArray, CallData } from "starknet";
+import Image from "next/image";
 
 type Role = "patient" | "hospital";
 
@@ -103,6 +104,13 @@ export default function Home() {
   return (
     <section className="flex justify-center items-center h-screen bg-gradient-to-br from-blue-100 to-purple-200">
       <div className="bg-white shadow-lg rounded-2xl p-10 max-w-xl w-full text-center">
+         <Image
+          src="/logo-removebg-preview.png"
+          alt="logo"
+          width={200}
+          height={200}
+          className="mx-auto"
+        />
         <h1 className="text-gray-900 font-bold text-4xl mb-3">
           Welcome to MediLedger
         </h1>
