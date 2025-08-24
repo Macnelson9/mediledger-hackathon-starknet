@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useAccount } from "@starknet-react/core";
-import { deriveUUID, toFeltUUID } from "@/utils/starkEncoding";
+import { deriveUUID, fromFeltUUID, toFeltUUID } from "@/utils/starkEncoding";
 import Image from "next/image";
 
 interface MedLedgerAccount {

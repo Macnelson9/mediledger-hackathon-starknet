@@ -1,13 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { CldUploadWidget } from "next-cloudinary";
 import { z } from "zod";
 import { useContractFetch, useContractWriteUtility } from "@/lib/starknet";
 import { useAccount } from "@starknet-react/core";
+import { toFeltUUID } from "@/utils/starkEncoding";
 import { MEDILEDGER_ABI } from "@/abi/Mediledger";
-import { shortString } from "starknet";
 
 interface Request {
   patientUuid: string;
@@ -57,23 +56,11 @@ export default function HospitalDashboardPatients() {
   const [showRecordsModal, setShowRecordsModal] = useState(false);
   const [records, setRecords] = useState<PatientRecord[]>([]);
   const [recordsPatientId, setRecordsPatientId] = useState<string | null>(null);
-  const { address } = useAccount();
 
   const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
-  // ✅ Move hooks to component level - only call when needed
-  const { readData: patientVerified, dataRefetch: refetchPatient } = useContractFetch("verify_patient", [
-    patientUuid || "0x0", // Provide fallback to prevent empty calls
-  ]);
+  const { address } = useAccount();
 
-  // ✅ Contract write hook at component level
-  const { writeAsync, writeIsPending } = useContractWriteUtility(
-    "request_access",
-    [patientUuid || "0x0", address || "0x0"],
-    MEDILEDGER_ABI
-  );
-
-  // ✅ Load hospital data from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     const account = localStorage.getItem("medledger_account");
@@ -104,10 +91,56 @@ export default function HospitalDashboardPatients() {
     }, 4000);
   };
 
-  // ✅ Fixed contract function usage
-  const handleSubmit = useCallback(async () => {
-    if (!hospitalUuid || !address) {
-      addToast("error", "Hospital not logged in or wallet not connected.");
+  const patientFelt = useMemo(() => {
+    if (!patientUuid) return;
+    try {
+      return toFeltUUID(patientUuid);
+    } catch (err) {
+      console.error("toFeltUUID error:", err);
+      return;
+    }
+  }, [patientUuid]);
+
+  // ✅ Move hooks to component level - only call when needed
+  const { readData: patientVerified } = useContractFetch("verify_patient", [
+    patientFelt || "0x0",
+  ]);
+
+  // ✅ Contract write hook at component level - pass encoded patient felt and caller address
+  const { writeAsync } = useContractWriteUtility(
+    "request_access",
+    [patientFelt || "0x0", address || "0x0"],
+    MEDILEDGER_ABI
+  );
+
+  // derive a boolean from the read contract response
+  const patientExists = useMemo(() => {
+    if (patientVerified == null) return false;
+    // readData from starknet-react can be an array; check first element for value
+    const val = Array.isArray(patientVerified)
+      ? patientVerified[0]
+      : patientVerified;
+
+    try {
+      const s = String(val).toLowerCase();
+      // common falsey representations: '0', '0x0', 'false'
+      if (s === "0" || s === "0x0" || s === "false") return false;
+      return true;
+    } catch (err) {
+      console.debug("patientVerified raw:", patientVerified, err);
+      return Boolean(val);
+    }
+  }, [patientVerified]);
+
+  // Debugging helper: log encoded id and raw contract response
+  useEffect(() => {
+    if (patientFelt) console.debug("patientFelt:", patientFelt);
+    console.debug("patientVerified raw:", patientVerified);
+  }, [patientFelt, patientVerified]);
+
+  const handleSubmit = async () => {
+    if (!hospitalUuid) {
+      addToast("error", "Hospital not logged in.");
       return;
     }
 
@@ -117,60 +150,38 @@ export default function HospitalDashboardPatients() {
       return;
     }
 
+    if (!patientExists) {
+      addToast("error", "Patient not found in MediLedger.");
+      return;
+    }
+
+    if (!writeAsync) {
+      addToast(
+        "error",
+        "Contract write not ready. Connect wallet and try again."
+      );
+      return;
+    }
+
     try {
-      // ✅ Step 1: Verify patient first
-      await refetchPatient();
-      // const { readData: patientVerified } = useContractFetch("verify_patient", [
-      //   patientUuid,
-      // ]);
+      await writeAsync();
+      // writeAsync is backed by useSendTransaction; it should return an object containing transaction_hash
+      addToast("success", "Transaction submitted to StarkNet.");
 
-      if (!patientVerified) {
-        addToast("error", "Patient not found on MediLedger.");
-        return;
-      }
-
-
-
-      // ✅ Step 2: Request access on-chain with correct function
-      try {
-        if (writeAsync) {
-          const tx = await writeAsync();
-          console.log("request_access TX:", tx);  
-          addToast("success", "Request sent to MediLedger contract!");
-        }
-        // const patientIdFelt = shortString.encodeShortString(patientUuid);
-        
-        // Initialize the contract write function with correct parameters
-        // const { writeAsync } = useContractWriteUtility(
-        //   "request_access",
-        //   [patientUuid, address],
-        //   MEDILEDGER_ABI
-        // );
-
-        // const tx = await writeAsync();
-        // console.log("request_access TX:", tx);
-        // addToast("success", "Request sent to MediLedger contract!");
-      } catch (err) {
-        console.error("request_access failed:", err);
-        addToast("error", "On-chain request failed. Using fallback only.");
-      }
-
-      // ✅ Always keep local fallback
-      const newRequest: Request = {
+      const newReq: Request = {
         patientUuid,
         hospitalUuid,
         status: "pending",
         timestamp: Date.now(),
       };
-      setRequests((prev) => [newRequest, ...prev]);
-
+      // persist locally so patient UI can read it
+      setRequests((r) => [newReq, ...r]);
       setPatientUuid("");
-      setShowModal(false);
     } catch (err) {
-      console.error(err);
-      addToast("error", "Unexpected error while sending request.");
+      console.error("Tx error:", err);
+      addToast("error", "Transaction failed.");
     }
-  }, [patientUuid, hospitalUuid, address]);
+  };
 
   const formatDate = (timestamp: number) =>
     new Date(timestamp).toLocaleString();
@@ -235,10 +246,8 @@ export default function HospitalDashboardPatients() {
     setShowRecordsModal(true);
   };
 
-  // Rest of the JSX remains the same...
   return (
     <div className="relative">
-      {/* Toasts */}
       <div className="fixed top-4 right-4 space-y-2 z-50">
         {toasts.map((toast) => (
           <div
@@ -251,11 +260,9 @@ export default function HospitalDashboardPatients() {
           </div>
         ))}
       </div>
-
       <h1 className="font-medium text-5xl leading-none tracking-normal">
         Patients
       </h1>
-
       <div className="mt-8">
         <button
           className="text-xl flex justify-start bg-blue-400 text-white font-medium px-4 py-3 rounded-lg cursor-pointer transition-colors ease-in-out hover:bg-blue-500"
@@ -264,7 +271,6 @@ export default function HospitalDashboardPatients() {
           Add New Patients
         </button>
       </div>
-{/* Requests list */}
       <div className="flex flex-col mt-8">
         <h3 className="text-3xl font-semibold mb-4">Recent Activities</h3>
         <div className="space-y-3">
@@ -316,9 +322,6 @@ export default function HospitalDashboardPatients() {
           ))}
         </div>
       </div>
-
-      {/* Rest of the component JSX remains the same... */}
-      {/* Modal: Request patient */}
       {showModal && (
         <div className="fixed inset-0 z-40 grid place-items-center backdrop-blur-sm bg-slate-900/20">
           <div className="w-full max-w-md rounded-2xl border border-slate-200/60 bg-white shadow-xl">
@@ -340,7 +343,7 @@ export default function HospitalDashboardPatients() {
               </label>
               <input
                 type="text"
-                placeholder="e.g., PAT-7FA34B21"
+                placeholder="e.g., MED-7FA34B21"
                 value={patientUuid}
                 onChange={(e) => setPatientUuid(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-300"
@@ -363,9 +366,6 @@ export default function HospitalDashboardPatients() {
           </div>
         </div>
       )}
-
-      {/* Other modals and components remain the same... */}
-{/* Modal: Upload record */}
       {showUploadModal && activeRequest && (
         <div className="fixed inset-0 z-50 grid place-items-center">
           <div
@@ -444,9 +444,14 @@ export default function HospitalDashboardPatients() {
                       maxFileSize: 25_000_000,
                     }}
                     onSuccess={(result: unknown) => {
-                      const info = (result as any)?.info as
-                        | { secure_url?: string; original_filename?: string }
-                        | undefined;
+                      const info = (
+                        result as unknown as {
+                          info?: {
+                            secure_url?: string;
+                            original_filename?: string;
+                          };
+                        }
+                      )?.info;
 
                       if (info?.secure_url) {
                         setFileUrl(info.secure_url);
@@ -460,11 +465,11 @@ export default function HospitalDashboardPatients() {
                       }
                     }}
                     onError={(err: unknown) => {
+                      const maybeErr = err as { message?: string } | undefined;
                       const message =
-                        (typeof err === "object" &&
-                          err &&
-                          "message" in (err as any) &&
-                          (err as any).message) ||
+                        (typeof maybeErr === "object" &&
+                          maybeErr &&
+                          maybeErr.message) ||
                         "Upload failed. Check your unsigned preset, allowed formats, and file size.";
                       addToast("error", `❌ ${message}`);
                     }}
@@ -521,8 +526,6 @@ export default function HospitalDashboardPatients() {
           </div>
         </div>
       )}
-
-      {/* Modal: View records */}
       {showRecordsModal && (
         <div className="fixed inset-0 z-50 grid place-items-center">
           <div
@@ -548,18 +551,19 @@ export default function HospitalDashboardPatients() {
                 {records.map((rec) => (
                   <li
                     key={rec.id}
-                    className="p-4 rounded-lg border border-slate-200 shadow-sm"
+                    className="p-4 border border-gray-200 rounded-lg bg-slate-50"
                   >
-                    <h4 className="font-medium">{rec.title}</h4>
-                    <p className="text-xs text-slate-500">
-                      Uploaded on {formatDate(rec.timestamp)}
+                    <p className="font-medium">{rec.title}</p>
+                    <p className="text-sm text-gray-600">{rec.fileName}</p>
+                    <p className="text-xs text-gray-500">
+                      Uploaded: {formatDate(rec.timestamp)}
                     </p>
                     {rec.url && (
                       <a
                         href={rec.url}
                         target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-600 text-sm hover:underline mt-1 inline-block"
+                        rel="noopener noreferrer"
+                        className="inline-block mt-2 text-blue-600 hover:underline text-sm"
                       >
                         View File
                       </a>

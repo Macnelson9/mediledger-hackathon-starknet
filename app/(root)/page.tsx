@@ -75,6 +75,24 @@ export default function Home() {
           result.transaction_hash`);
         console.log(`Redirecting to ${selectedRole} dashboard...`);
 
+        // Persist a minimal medledger_account entry locally so dashboards can pick up role and id
+        try {
+          const accountEntry = {
+            id: deriveUUID(address, selectedRole),
+            address,
+            role: selectedRole,
+          };
+          localStorage.setItem(
+            "medledger_account",
+            JSON.stringify(accountEntry)
+          );
+        } catch (err) {
+          console.warn(
+            "Could not write medledger_account to localStorage:",
+            err
+          );
+        }
+
         if (selectedRole === "patient") {
           router.push("/patient/dashboard");
         } else {
@@ -104,7 +122,7 @@ export default function Home() {
   return (
     <section className="flex justify-center items-center h-screen bg-gradient-to-br from-blue-100 to-purple-200">
       <div className="bg-white shadow-lg rounded-2xl p-10 max-w-xl w-full text-center">
-         <Image
+        <Image
           src="/logo-removebg-preview.png"
           alt="logo"
           width={200}

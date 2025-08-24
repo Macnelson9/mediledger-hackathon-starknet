@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useAccount } from "@starknet-react/core";
-import { deriveUUID, toFeltUUID } from "@/utils/starkEncoding";
+import { deriveUUID, fromFeltUUID, toFeltUUID } from "@/utils/starkEncoding";
 import { shortString } from "starknet";
 import Image from "next/image";
 
@@ -34,8 +34,9 @@ export function PatientNav() {
   const handleCopyUUID = async () => {
     if (address) {
       const uuid = toFeltUUID(deriveUUID(address, "patient"));
+      const formatUUID = fromFeltUUID(uuid);
       try {
-        await navigator.clipboard.writeText(uuid);
+        await navigator.clipboard.writeText(formatUUID);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       } catch (err) {
@@ -43,6 +44,7 @@ export function PatientNav() {
       }
     }
   };
+
   const patientUUID = address
     ? toFeltUUID(deriveUUID(address, "patient"))
     : null;
@@ -72,7 +74,7 @@ export function PatientNav() {
             </p>
             <div className="flex items-center gap-2">
               <code className="text-xs text-gray-800 bg-gray-100 px-2 py-1 rounded flex-1 break-all">
-                {patientUUID}
+                {fromFeltUUID(patientUUID)}
               </code>
               <button
                 onClick={handleCopyUUID}
